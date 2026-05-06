@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+bleak
+pandas
+openpyxl
+psycopg2-binary
+sqlalchemy
+python-multipart
+python-dotenv
+jinja2
+PyBluez==0.23 # Requires Microsoft Bluetooth driver on Windows
