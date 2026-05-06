@@ -24,13 +24,33 @@ A full-stack desktop application for automated Bluetooth (BLE) attendance.
 3. **Register Students**:
    - Enter a section name.
    - Upload your `AttendanceSheet.xlsx` (Column A: Roll No, Column B: Name).
-   - Click "Start Registration Session" to scan for student devices and assign them.
+   - Click "Start Registration Session" to scan for student devices.
+   - **Important**: For modern phones (Android/iOS), follow the "First-Time Student Setup" below.
+   - Once paired/detected, select the student's Roll Number + their device → click "Assign MAC".
 4. **Take Attendance**:
    - Go to the "Take Attendance" tab.
    - Set up the session (Title, Date, Section).
    - Click "Next" to start the 2-minute scan.
-   - Students with registered devices will automatically be marked present.
+   - Students with registered devices will automatically be marked present as they enter the room.
    - Export to Excel once the session ends.
+
+## First-Time Student Setup (Do this ONCE at semester start)
+
+For each student:
+1. Student opens their phone → **Settings** → **Bluetooth** (keep this screen open).
+2. On teacher's laptop: **Windows Settings** → **Bluetooth & devices** → **Add device**.
+3. Select the student's phone from the list → Complete pairing on both devices.
+4. Open the attendance system → **Register Students** → **Start Registration Session**.
+5. Click 🔄 **Refresh Devices** → student's phone appears by real name (e.g., "Rozina's S24 Ultra").
+6. Assign their phone to their roll number → Done.
+
+**After this one-time setup**:
+- Student just needs Bluetooth **ON** when entering class.
+- System detects them automatically — no phone interaction needed.
+- Works even with phone in pocket/bag.
+
+## Why Pairing is Required
+Android and iOS randomize Bluetooth MAC addresses for privacy. Only paired devices reveal their stable, permanent identity to Windows. Pairing is a one-time 30-second process per student that ensures attendance works automatically for the rest of the year.
 
 - **Excel Error**: Ensure the file format matches (Roll Number in col A, Name in col B).
 

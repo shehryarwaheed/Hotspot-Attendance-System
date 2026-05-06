@@ -52,15 +52,17 @@
                 <li id="tab-attendance" onclick="switchTab('attendance')">
                     <i class="fas fa-check-circle"></i> Take Attendance
                 </li>
+                <li id="tab-history" onclick="switchTab('history')">
+                    <i class="fas fa-history"></i> Semester Attendances
+                </li>
+                <li id="tab-fetched" onclick="switchTab('fetched')">
+                    <i class="fas fa-users"></i> Fetched Students
+                </li>
             </ul>
         </nav>
 
         <!-- Main Content -->
         <main class="content">
-            <div id="classic-warning" class="classic-warning">
-                <i class="fas fa-exclamation-triangle"></i>
-                ⚠️ Classic Bluetooth unavailable. Install PyBluez for better device detection. Running in BLE-only mode.
-            </div>
             <!-- Register Students Tab -->
             <section id="section-register" class="tab-content active">
                 <h1>Register Students</h1>
@@ -92,12 +94,32 @@
                     <div id="upload-status" class="status-msg"></div>
                 </div>
 
+                <!-- Pairing Instructions Banner -->
+                <div class="card instruction-banner" id="pairing-banner" style="display:none; background: rgba(59, 130, 246, 0.1); border-left: 4px solid #3b82f6;">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                        <div>
+                            <h4 style="color: #1e40af; margin-bottom: 0.5rem;"><i class="fas fa-mobile-alt"></i> HOW TO REGISTER A STUDENT'S DEVICE</h4>
+                            <ul style="font-size: 0.85rem; color: #1e40af; list-style: none; padding-left: 0;">
+                                <li style="margin-bottom: 0.25rem;"><strong>Step 1:</strong> Ask the student to open their phone's Bluetooth settings screen.</li>
+                                <li style="margin-bottom: 0.25rem;"><strong>Step 2:</strong> On THIS laptop → Windows Settings → Bluetooth → Add Device → pair with their phone.</li>
+                                <li style="margin-bottom: 0.25rem;"><strong>Step 3:</strong> Once paired, click the 🔄 <strong>Refresh Devices</strong> button below. Their phone will appear by name.</li>
+                                <li><strong>Step 4:</strong> Select their Roll Number + their device → click Assign MAC.</li>
+                            </ul>
+                            <p style="font-size: 0.8rem; color: #3b82f6; margin-top: 0.5rem; font-weight: 600;">✅ This is a ONE-TIME setup per student per semester.</p>
+                        </div>
+                        <button class="btn-close-banner" onclick="this.parentElement.parentElement.style.display='none'" title="Hide instructions" style="background:none; border:none; color:#3b82f6; cursor:pointer;"><i class="fas fa-times"></i></button>
+                    </div>
+                </div>
+
                 <div class="card" id="reg-preview-card" style="display:none;">
-                    <h3>Student Preview & Registration</h3>
-                    <div class="controls-row">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                        <h3 style="margin-bottom: 0;">Student Preview & Registration</h3>
+                        <span id="reg-progress" style="font-weight: 700; color: #6366f1; background: rgba(99, 102, 241, 0.1); padding: 0.4rem 1rem; border-radius: 2rem; font-size: 0.85rem;"></span>
+                    </div>
+
+                    <div class="controls-row" style="margin-bottom: 2rem;">
                         <button id="btn-start-reg" class="btn-success">START REGISTRATION SESSION</button>
                         <button id="btn-stop-reg" class="btn-danger" style="display:none;">STOP REGISTRATION SESSION</button>
-                        <span id="reg-progress"></span>
                     </div>
                     
                     <div class="reg-assignment" style="display:none;" id="assignment-row">
@@ -107,9 +129,13 @@
                         </div>
                         <div class="form-group">
                             <label>Detected Device</label>
-                            <select id="select-device"></select>
+                            <div style="display: flex; gap: 0.75rem; align-items: stretch;">
+                                <select id="select-device" style="flex-grow: 1;"></select>
+                                <button id="btn-refresh-devices" class="btn-secondary-glass" title="Refresh Paired Devices" style="width: 50px; display: flex; align-items: center; justify-content: center;"><i class="fas fa-sync-alt"></i></button>
+                            </div>
+                            <small id="device-count" style="display: block; margin-top: 0.5rem; color: #6366f1; font-weight: 600;"></small>
                         </div>
-                        <button id="btn-assign" class="btn-primary">ASSIGN MAC ADDRESS</button>
+                        <button id="btn-assign" class="btn-primary full-width" style="margin-top: 1rem;">ASSIGN MAC ADDRESS</button>
                     </div>
 
                     <div class="table-container">
@@ -121,6 +147,7 @@
                                     <th>Section</th>
                                     <th>MAC/UUID</th>
                                     <th>Status</th>
+                                    <th>Action</th>
                                 </tr>
                             </thead>
                             <tbody id="student-table-body"></tbody>
@@ -153,27 +180,51 @@
 
                 <!-- Attendance Ready State -->
                 <div id="attendance-active" class="tab-pane" style="display:none;">
-                    <div class="card">
-                        <div class="session-header">
-                            <div id="session-info-display">
-                                <h3 id="active-lecture-title">Lecture Title</h3>
-                                <p id="session-stats">0 present, 0 absent</p>
-                            </div>
-                            <div class="timer" id="attendance-timer">02:00</div>
-                            <button id="btn-end-early" class="btn-danger-glass">STOP SESSION EARLY</button>
+                    <div class="attendance-header-bar">
+                        <div id="session-info-display">
+                            <h3 id="active-lecture-title">Lecture Title</h3>
+                            <p id="session-stats">0 present, 0 absent</p>
                         </div>
-                        
-                        <div class="table-container">
-                            <table id="live-attendance-table">
-                                <thead>
-                                    <tr>
-                                        <th>Roll Number</th>
-                                        <th>Name</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
+                        <div class="timer-container">
+                            <div class="timer" id="attendance-timer">02:00</div>
+                        </div>
+                        <div class="header-actions" style="display: flex; gap: 1rem;">
+                            <button id="btn-abort" class="btn-warning">ABORT SESSION</button>
+                            <button id="btn-end-early" class="btn-danger">STOP SESSION EARLY</button>
+                        </div>
+                    </div>
+                    
+                    <div class="live-attendance-grid">
+                        <!-- Absent Students Card -->
+                        <div class="card attendance-split-card">
+                            <h3 class="absent-header"><i class="fas fa-user-times"></i> Absent Students</h3>
+                            <div class="table-container">
+                                <table id="table-absent-students">
+                                    <thead>
+                                        <tr>
+                                            <th>Roll Number</th>
+                                            <th>Name</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Present Students Card -->
+                        <div class="card attendance-split-card">
+                            <h3 class="present-header"><i class="fas fa-user-check"></i> Present Students</h3>
+                            <div class="table-container">
+                                <table id="table-present-students">
+                                    <thead>
+                                        <tr>
+                                            <th>Roll Number</th>
+                                            <th>Name</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -187,6 +238,82 @@
                         <div class="action-row">
                             <button id="btn-export-yes" class="btn-success">Yes, Export & Finish</button>
                             <button id="btn-export-no" class="btn-primary">No, Just Finish</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Semester Attendances (History) Tab -->
+            <section id="section-history" class="tab-content">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                    <h1>Semester Attendances</h1>
+                    <button id="btn-back-to-sessions" class="btn-secondary-glass" style="display:none;"><i class="fas fa-arrow-left"></i> Back to Sessions</button>
+                </div>
+
+                <!-- Sessions List (Cards) -->
+                <div id="history-sessions-list" class="history-grid"></div>
+
+                <!-- Session Detail (Editable Table) -->
+                <div id="history-session-detail" style="display:none;">
+                    <div class="card">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                            <h3 id="history-detail-title">Lecture Details</h3>
+                            <div class="action-row" style="gap: 1rem; margin-top: 0;">
+                                <button id="btn-export-history" class="btn-success-glass"><i class="fas fa-file-excel"></i> Export Selected</button>
+                                <button id="btn-save-history" class="btn-primary">SAVE CHANGES</button>
+                            </div>
+                        </div>
+                        <div class="table-container">
+                            <table id="history-attendance-table">
+                                <thead>
+                                    <tr>
+                                        <th>Roll Number</th>
+                                        <th>Name</th>
+                                        <th>Status</th>
+                                        <th>Marked At</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Fetched Students Tab -->
+            <section id="section-fetched" class="tab-content">
+                <div class="header-with-action">
+                    <h1>Fetched Students</h1>
+                    <div style="display: flex; gap: 1rem; align-items: center;">
+                        <button id="btn-back-to-sections-fetched" class="btn-secondary-glass" style="display:none;"><i class="fas fa-arrow-left"></i> Back to Sections</button>
+                        <button id="btn-refresh-students" class="btn-primary">
+                            <i class="fas fa-sync-alt"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sections List (Cards) -->
+                <div id="fetched-sections-list" class="history-grid"></div>
+
+                <!-- Section Detail (Table) -->
+                <div id="fetched-section-detail" style="display:none;">
+                    <div class="card">
+                        <h3 id="fetched-detail-title">Section Students</h3>
+                        <div class="table-container">
+                            <table id="table-fetched-students">
+                                <thead>
+                                    <tr>
+                                        <th>Roll Number</th>
+                                        <th>Name</th>
+                                        <th>Status</th>
+                                        <th>Device Name</th>
+                                        <th>MAC/UUID</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody></tbody>
+                            </table>
                         </div>
                     </div>
                 </div>

@@ -39,7 +39,7 @@ def list_students(section: str = None, db: Session = Depends(get_db)):
     query = db.query(models.Student)
     if section:
         query = query.filter(models.Student.section == section)
-    return query.all()
+    return query.order_by(models.Student.roll_number.asc()).all()
 
 @router.get("/sections")
 def get_sections(db: Session = Depends(get_db)):

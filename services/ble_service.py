@@ -1,159 +1,145 @@
 import asyncio
-import time
 import logging
-import threading
-from concurrent.futures import ThreadPoolExecutor
+import subprocess
+import json
+import re
+import time
 from bleak import BleakScanner
-
-# ERROR HANDLING: Wrap PyBluez in try/except
-try:
-    import bluetooth
-    CLASSIC_BT_AVAILABLE = True
-except ImportError:
-    CLASSIC_BT_AVAILABLE = False
-    logging.warning("Classic Bluetooth (PyBluez) not found. Running in BLE-only mode.")
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
 class BluetoothService:
     def __init__(self):
         self.is_scanning = False
-        self.discovered_devices = {}  # { address: { "address": str, "name": str, "rssi": int, "source": str, "rssi_estimated": bool } }
-        self._ble_task = None
-        self._classic_loop_task = None
-        self._start_time = 0
-        self._executor = ThreadPoolExecutor(max_workers=1)
-        self.classic_available = CLASSIC_BT_AVAILABLE
-        self.RSSI_THRESHOLD = -95  # Problem 1: Updated threshold
+        self.discovered_devices = {}  # { address: { "address": str, "name": str, "rssi": int, "source": str, "rssi_estimated": bool, "paired": bool, "last_seen": float } }
+        self.paired_registry = {}     # { "AA:BB:CC:DD:EE:FF": "Friendly Name" }
+        self._scanner_task = None
+        self._registry_task = None
+        self._executor = ThreadPoolExecutor(max_workers=2)
+        self.bluetooth_error = None
+        self.classic_available = False
 
-    def _classic_scan_worker(self):
-        """Blocking classic scan to be run in a thread."""
-        if not self.classic_available:
-            return []
-        try:
-            # SCANNER 1 — Classic Bluetooth (PyBluez)
-            devices = bluetooth.discover_devices(
-                duration=8,
-                lookup_names=True,
-                flush_cache=True,
-                lookup_class=False
-            )
-            # returns list of (address, name) tuples
-            return devices
-        except Exception as e:
-            logger.error(f"Classic scan error: {e}")
-            return []
+    def _extract_mac_from_device_id(self, device_id):
+        """Extract MAC from BTHENUM\DEV_AABBCCDDEEFF\..."""
+        match = re.search(r'DEV_([0-9A-Fa-f]{12})', device_id)
+        if match:
+            mac = match.group(1)
+            return ":".join(mac[i:i+2] for i in range(0, 12, 2)).upper()
+        return None
 
-    async def _classic_scan_loop(self):
-        """Loop that runs classic scan periodically."""
-        try:
-            while self.is_scanning:
-                if self.classic_available:
-                    loop = asyncio.get_event_loop()
-                    devices = await loop.run_in_executor(self._executor, self._classic_scan_worker)
+    async def _powershell_registry_loop(self):
+        """Runs every 10s. Builds paired_registry for name resolution only."""
+        while self.is_scanning:
+            try:
+                loop = asyncio.get_event_loop()
+                result = await loop.run_in_executor(
+                    self._executor,
+                    lambda: subprocess.run(
+                        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+                         "Get-PnpDevice -Class Bluetooth | Select-Object FriendlyName, DeviceID | ConvertTo-Json"],
+                        capture_output=True, text=True, timeout=8
+                    )
+                )
+                if result.returncode == 0 and result.stdout.strip():
+                    raw = json.loads(result.stdout)
+                    if isinstance(raw, dict):
+                        raw = [raw]
                     
-                    for address, name in devices:
-                        # For Classic BT devices where RSSI is unavailable → include with rssi = -70
-                        self._update_device(
-                            address=address,
-                            name=name,
-                            rssi=-70,
-                            source="classic",
-                            rssi_estimated=True
-                        )
-                
-                # classic_scan repeats every 15 seconds in a loop
-                for _ in range(15):
-                    if not self.is_scanning: break
-                    await asyncio.sleep(1.0)
-        except asyncio.CancelledError:
-            logger.info("Classic scan loop cancelled")
+                    new_registry = {}
+                    for item in raw:
+                        dev_id = item.get("DeviceID", "")
+                        name = item.get("FriendlyName", "")
+                        if "DEV_" in dev_id and name:
+                            mac = self._extract_mac_from_device_id(dev_id)
+                            if mac:
+                                new_registry[mac] = name
+                    self.paired_registry = new_registry
+            except Exception as e:
+                logger.warning(f"PowerShell registry error: {e}")
+            await asyncio.sleep(10)
 
-    def _update_device(self, address, name, rssi, source, rssi_estimated=False):
-        # RSSI FILTER RULE (strict): Threshold -95 dBm
-        if rssi < self.RSSI_THRESHOLD and not rssi_estimated:
-            return
+    def _detection_callback(self, device, advertisement_data):
+        """BleakScanner callback. Updates discovered_devices."""
+        address = device.address.upper().strip()
+        rssi = advertisement_data.rssi
+        
+        # Name Resolution Logic: Paired Registry -> Local Name -> Device Name -> Unknown
+        name = (self.paired_registry.get(address)
+                or advertisement_data.local_name
+                or device.name
+                or "Unknown")
 
-        # MERGED DEVICE DICT logic
-        if address in self.discovered_devices:
-            existing = self.discovered_devices[address]
-            if existing["source"] == "classic" and source == "ble":
-                existing["rssi"] = rssi
-                existing["rssi_estimated"] = False
-                return
-            
         self.discovered_devices[address] = {
             "address": address,
-            "name": name,
+            "name": name.strip(),
             "rssi": rssi,
-            "source": source,
-            "rssi_estimated": rssi_estimated
+            "source": "ble",
+            "rssi_estimated": False,
+            "paired": (address in self.paired_registry),
+            "last_seen": time.time()
         }
 
-    async def _ble_scan_loop(self):
-        """Continuous BLE scan."""
-        def detection_callback(device, advertisement_data):
-            # Name resolution priority
-            name = device.name or advertisement_data.local_name or f"Unknown ({device.address[:6]})"
-            rssi = advertisement_data.rssi
-            
-            self._update_device(
-                address=device.address,
-                name=name,
-                rssi=rssi,
-                source="ble",
-                rssi_estimated=False
-            )
-
+    async def _scanner_loop(self):
+        """Background loop for BleakScanner and stale cleanup."""
         try:
-            async with BleakScanner(detection_callback) as scanner:
+            async with BleakScanner(
+                detection_callback=self._detection_callback,
+                scanning_mode="active"
+            ) as scanner:
                 while self.is_scanning:
+                    # Stale device cleanup (remove if not seen for 30s)
+                    now = time.time()
+                    stale = [addr for addr, d in self.discovered_devices.items()
+                             if now - d.get("last_seen", now) > 30]
+                    for addr in stale:
+                        del self.discovered_devices[addr]
+                    
                     await asyncio.sleep(0.5)
-        except asyncio.CancelledError:
-            logger.info("BLE scan loop cancelled")
+        except Exception as e:
+            logger.error(f"Bleak scanner error: {e}")
+            self.bluetooth_error = "Bluetooth unavailable"
+            self.is_scanning = False
 
     async def start_scan(self):
+        """Start both PowerShell registry and Bleak scanning tasks."""
         if self.is_scanning:
             return
+        
+        self.bluetooth_error = None
         self.is_scanning = True
         self.discovered_devices = {}
-        self._start_time = time.time()
         
-        # Start both scanners concurrently
-        self._ble_task = asyncio.create_task(self._ble_scan_loop())
-        self._classic_loop_task = asyncio.create_task(self._classic_scan_loop())
-        
-        logger.info("Dual Bluetooth Scan started")
+        # Start both tasks
+        self._registry_task = asyncio.create_task(self._powershell_registry_loop())
+        self._scanner_task = asyncio.create_task(self._scanner_loop())
+        logger.info("BLE Scan + Paired Registry started")
 
     async def stop_scan(self):
+        """Stop all scanning tasks cleanly."""
         self.is_scanning = False
         
-        # Problem 4: Cleanly cancel both tasks
-        if self._ble_task:
-            self._ble_task.cancel()
-            try: await self._ble_task
+        if self._registry_task:
+            self._registry_task.cancel()
+            try: await self._registry_task
             except asyncio.CancelledError: pass
-            self._ble_task = None
+            self._registry_task = None
             
-        if self._classic_loop_task:
-            self._classic_loop_task.cancel()
-            try: await self._classic_loop_task
+        if self._scanner_task:
+            self._scanner_task.cancel()
+            try: await self._scanner_task
             except asyncio.CancelledError: pass
-            self._classic_loop_task = None
+            self._scanner_task = None
             
         self.discovered_devices = {}
-        logger.info("Dual Bluetooth Scan stopped")
+        logger.info("BLE scan stopped")
 
     async def get_discovered_devices(self):
-        # Only return results after 5 seconds
-        if time.time() - self._start_time < 5:
-            return []
+        """Return discovered devices sorted: Paired first, then RSSI descending."""
+        if self.bluetooth_error:
+            return {"error": self.bluetooth_error}
             
-        # Problem 3: Correct filter to include estimated RSSI devices
-        devices = [d for d in self.discovered_devices.values() 
-                  if d.get("rssi_estimated", False) or d["rssi"] >= self.RSSI_THRESHOLD]
-        
-        # Sort by rssi descending (strongest signal first)
-        return sorted(devices, key=lambda x: x["rssi"], reverse=True)
+        devices = list(self.discovered_devices.values())
+        return sorted(devices, key=lambda x: (not x.get("paired", False), -x["rssi"]))
 
 ble_service = BluetoothService()
