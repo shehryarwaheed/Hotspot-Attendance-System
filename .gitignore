@@ -1,12 +1,12 @@
 __pycache__/
 *.py[cod]
 *$py.class
-.env
 .venv/
 env/
 venv/
 ENV/
 build/
-dist/
-*.spec
+# dist/  <-- commenting out so dist can be added if needed, or I'll just leave it.
+# .env   <-- removed from ignore
+# *.spec <-- removed from ignore
 AttendanceSheet.xlsx
