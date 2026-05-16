@@ -674,3 +674,32 @@ tr:hover td {
     opacity: 0.3;
     cursor: not-allowed;
 }
+
+/* Hotspot Status Bar */
+.hotspot-status-bar {
+    padding: 1rem 1.5rem;
+    border-radius: 1rem;
+    margin-bottom: 1.5rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    animation: fadeIn 0.3s ease-out;
+}
+
+.hotspot-status-bar.green {
+    background: rgba(16, 185, 129, 0.1);
+    color: #059669;
+    border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.hotspot-status-bar.red {
+    background: rgba(239, 68, 68, 0.1);
+    color: #dc2626;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.hotspot-status-bar i {
+    font-size: 1.2rem;
+}

@@ -3,9 +3,20 @@ let scanInterval = null;
 let attendanceInterval = null;
 let timerInterval = null;
 let currentLectureId = null;
+let wifiAttendanceInterval = null;
+let wifiTimerInterval = null;
+let wifiTimeRemaining = 0; // Local timer state
+let wifiCurrentSectionStudents = [];
+
+// Hierarchical History State
+let allHistorySessions = [];
+let currentHistoryView = 'sections'; // 'sections', 'titles', 'dates', 'detail'
+let selectedHistorySection = null;
+let selectedHistoryTitle = null;
 
 // Tab Switching
 function switchTab(tab) {
+    localStorage.setItem('activeTab', tab);
     currentTab = tab;
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     document.querySelectorAll('.nav-links li').forEach(l => l.classList.remove('active'));
@@ -25,6 +36,47 @@ function switchTab(tab) {
     if (tab === 'fetched') {
         loadFetchedStudents();
     }
+
+    if (tab === 'wifi-registration') {
+        startWifiStatusPolling();
+        if (wifiLoadedSection) loadWifiSectionData(wifiLoadedSection);
+    }
+
+    if (tab === 'wifi-attendance') {
+        startWifiStatusPolling();
+        loadWifiLectures();
+    }
+}
+
+function loadWifiLectures() {
+    loadWifiAttendanceSections();
+    checkWifiAttendanceStatus();
+}
+
+async function checkWifiAttendanceStatus() {
+    try {
+        const res = await fetch('/wifi-attendance/status');
+        const data = await res.json();
+        if (data.session_active && data.lecture_id) {
+            currentLectureId = data.lecture_id;
+            document.getElementById('wifi-att-setup').style.display = 'none';
+            document.getElementById('wifi-att-active').style.display = 'block';
+            
+            // Sync local time with server authoritative time
+            wifiTimeRemaining = data.time_remaining;
+            
+            if (!wifiTimerInterval) {
+                startWifiLocalTimer();
+            }
+            if (!wifiAttendanceInterval) {
+                wifiAttendanceInterval = setInterval(checkWifiAttendanceStatus, 5000);
+            }
+            
+            updateWifiAttendanceUI(data);
+        } else {
+            stopWifiAttendanceUI();
+        }
+    } catch(e) { console.error(e); }
 }
 
 // REGISTER STUDENTS LOGIC
@@ -33,7 +85,7 @@ const fileInput = document.getElementById('student-file');
 
 // Drag and drop events
 ['dragover', 'dragenter'].forEach(eventName => {
-    dropZone.addEventListener(eventName, (e) => {
+    if(dropZone) dropZone.addEventListener(eventName, (e) => {
         e.preventDefault();
         dropZone.style.borderColor = '#a855f7';
         dropZone.style.background = 'rgba(255, 255, 255, 0.4)';
@@ -41,14 +93,14 @@ const fileInput = document.getElementById('student-file');
 });
 
 ['dragleave', 'drop'].forEach(eventName => {
-    dropZone.addEventListener(eventName, (e) => {
+    if(dropZone) dropZone.addEventListener(eventName, (e) => {
         e.preventDefault();
         dropZone.style.borderColor = '#6366f1';
         dropZone.style.background = 'rgba(255, 255, 255, 0.2)';
     });
 });
 
-dropZone.addEventListener('drop', (e) => {
+if(dropZone) dropZone.addEventListener('drop', (e) => {
     const dt = e.dataTransfer;
     const files = dt.files;
     if (files.length > 0) {
@@ -57,7 +109,7 @@ dropZone.addEventListener('drop', (e) => {
     }
 });
 
-fileInput.addEventListener('change', () => {
+if(fileInput) fileInput.addEventListener('change', () => {
     if (fileInput.files.length > 0) {
         updateFileDisplay(fileInput.files[0]);
     }
@@ -70,7 +122,8 @@ function updateFileDisplay(file) {
     document.getElementById('upload-status').innerText = "";
 }
 
-document.getElementById('btn-remove-file').addEventListener('click', (e) => {
+const btnRemoveFile = document.getElementById('btn-remove-file');
+if(btnRemoveFile) btnRemoveFile.addEventListener('click', (e) => {
     e.preventDefault();
     fileInput.value = "";
     document.getElementById('upload-content-default').style.display = 'flex';
@@ -78,7 +131,8 @@ document.getElementById('btn-remove-file').addEventListener('click', (e) => {
     document.getElementById('upload-status').innerText = "File removed";
 });
 
-document.getElementById('btn-upload').addEventListener('click', async () => {
+const btnUpload = document.getElementById('btn-upload');
+if(btnUpload) btnUpload.addEventListener('click', async () => {
     const section = document.getElementById('reg-section').value;
     const file = document.getElementById('student-file').files[0];
     
@@ -154,7 +208,8 @@ async function loadStudentPreview(section) {
 }
 
 // BLE Registration Scan
-document.getElementById('btn-start-reg').addEventListener('click', () => {
+const btnStartReg = document.getElementById('btn-start-reg');
+if(btnStartReg) btnStartReg.addEventListener('click', () => {
     document.getElementById('btn-start-reg').style.display = 'none';
     document.getElementById('btn-stop-reg').style.display = 'inline-block';
     document.getElementById('assignment-row').style.display = 'grid';
@@ -163,7 +218,8 @@ document.getElementById('btn-start-reg').addEventListener('click', () => {
     startScanPolling();
 });
 
-document.getElementById('btn-stop-reg').addEventListener('click', async () => {
+const btnStopReg = document.getElementById('btn-stop-reg');
+if(btnStopReg) btnStopReg.addEventListener('click', async () => {
     await fetch('/bluetooth/stop', { method: 'POST' });
     stopScanPolling();
     
@@ -221,13 +277,12 @@ function renderDeviceDropdown() {
     selectDevice.value = currentVal;
 }
 
-// Refresh button logic
-document.getElementById('btn-refresh-devices').addEventListener('click', async () => {
+const btnRefreshDevices = document.getElementById('btn-refresh-devices');
+if(btnRefreshDevices) btnRefreshDevices.addEventListener('click', async () => {
     const btn = document.getElementById('btn-refresh-devices');
     btn.classList.add('fa-spin');
-    // We just restart the scan to trigger a fresh PowerShell run
     await fetch('/bluetooth/stop', { method: 'POST' });
-    await fetch('/bluetooth/scan'); // This will start it again
+    await fetch('/bluetooth/scan'); 
     setTimeout(() => btn.classList.remove('fa-spin'), 1000);
 });
 
@@ -238,7 +293,8 @@ function stopScanPolling() {
     }
 }
 
-document.getElementById('btn-assign').addEventListener('click', async () => {
+const btnAssign = document.getElementById('btn-assign');
+if(btnAssign) btnAssign.addEventListener('click', async () => {
     const roll = document.getElementById('select-student').value;
     const selectDevice = document.getElementById('select-device');
     const mac = selectDevice.value;
@@ -249,7 +305,6 @@ document.getElementById('btn-assign').addEventListener('click', async () => {
         return;
     }
     
-    // Safeguard: Check if this MAC is already assigned to someone else in the current table
     const existingRows = document.querySelectorAll('#student-table-body tr');
     let duplicateStudentName = null;
     existingRows.forEach(row => {
@@ -312,10 +367,12 @@ async function checkRegisteredStudents() {
     } catch (err) { console.error("Failed to check students", err); }
 }
 
-document.getElementById('btn-att-next').addEventListener('click', async () => {
+const btnAttNext = document.getElementById('btn-att-next');
+if(btnAttNext) btnAttNext.addEventListener('click', async () => {
     const title = document.getElementById('att-title').value;
     const date = document.getElementById('att-date').value;
     const section = document.getElementById('att-section-dropdown').value;
+    const duration = document.getElementById('att-duration').value;
     
     if (!title || !date || !section) {
         alert("Please fill all fields.");
@@ -325,7 +382,7 @@ document.getElementById('btn-att-next').addEventListener('click', async () => {
     const response = await fetch('/attendance/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, date, section })
+        body: JSON.stringify({ title, date, section, duration: parseInt(duration) })
     });
     
     if (response.ok) {
@@ -335,7 +392,6 @@ document.getElementById('btn-att-next').addEventListener('click', async () => {
         document.getElementById('attendance-active').style.display = 'block';
         document.getElementById('active-lecture-title').innerText = `${title} - ${section}`;
         
-        // Block history tab during session
         document.getElementById('tab-history').classList.add('tab-blocked');
         
         startAttendanceSession();
@@ -411,17 +467,14 @@ async function endSession() {
     document.getElementById('attendance-active').style.display = 'none';
     document.getElementById('session-complete').style.display = 'block';
     
-    // Unblock history tab
     document.getElementById('tab-history').classList.remove('tab-blocked');
 }
 
-if (document.getElementById('btn-end-early')) {
-    document.getElementById('btn-end-early').addEventListener('click', endSession);
-}
+const btnEndEarly = document.getElementById('btn-end-early');
+if (btnEndEarly) btnEndEarly.addEventListener('click', endSession);
 
-if (document.getElementById('btn-abort')) {
-    document.getElementById('btn-abort').addEventListener('click', abortSession);
-}
+const btnAbort = document.getElementById('btn-abort');
+if (btnAbort) btnAbort.addEventListener('click', abortSession);
 
 async function abortSession() {
     if (!confirm("Are you sure you want to ABORT? This will stop the session and NOT save any attendance data.")) {
@@ -433,22 +486,19 @@ async function abortSession() {
     
     try {
         await fetch(`/attendance/abort/${currentLectureId}`, { method: 'DELETE' });
-        await fetch('/bluetooth/stop', { method: 'POST' }); // Ensure scanning stops
+        await fetch('/bluetooth/stop', { method: 'POST' }); 
     } catch (err) { console.error(err); }
     
-    // Unblock history tab
     document.getElementById('tab-history').classList.remove('tab-blocked');
     
-    // Reset UI to setup state
     document.getElementById('attendance-active').style.display = 'none';
     document.getElementById('attendance-setup').style.display = 'block';
     
-    // Reset timer display
     document.getElementById('attendance-timer').innerText = "02:00";
 }
 
-document.getElementById('btn-export-yes').addEventListener('click', () => {
-    // Create a hidden link to trigger download
+const btnExportYes = document.getElementById('btn-export-yes');
+if(btnExportYes) btnExportYes.addEventListener('click', () => {
     const downloadUrl = `/attendance/export/${currentLectureId}`;
     const link = document.createElement('a');
     link.href = downloadUrl;
@@ -457,70 +507,172 @@ document.getElementById('btn-export-yes').addEventListener('click', () => {
     link.click();
     document.body.removeChild(link);
     
-    // Delay reload to ensure download starts
     setTimeout(() => {
         location.reload();
     }, 1500);
 });
 
-document.getElementById('btn-export-no').addEventListener('click', () => {
+const btnExportNo = document.getElementById('btn-export-no');
+if(btnExportNo) btnExportNo.addEventListener('click', () => {
     location.reload();
 });
 
-// Set default date to today
-document.getElementById('att-date').valueAsDate = new Date();
+const attDateInput = document.getElementById('att-date');
+if(attDateInput) attDateInput.valueAsDate = new Date();
 
 // SEMESTER ATTENDANCES (HISTORY) LOGIC
 async function loadSessions() {
     const listEl = document.getElementById('history-sessions-list');
     const detailEl = document.getElementById('history-session-detail');
     const backBtn = document.getElementById('btn-back-to-sessions');
+    const mainTitle = document.querySelector('#section-history h1');
     
     listEl.style.display = 'grid';
     detailEl.style.display = 'none';
     backBtn.style.display = 'none';
+    mainTitle.innerText = "Semester Attendances";
+    currentHistoryView = 'sections';
     
     try {
         const response = await fetch('/attendance/sessions');
-        const sessions = await response.json();
-        
-        listEl.innerHTML = '';
-        if (sessions.length === 0) {
-            listEl.innerHTML = '<div class="card" style="grid-column: 1/-1; text-align: center;">No sessions found.</div>';
-            return;
-        }
-
-        sessions.forEach(s => {
-            const card = document.createElement('div');
-            card.className = 'history-card';
-            card.innerHTML = `
-                <div class="date-badge">${s.date}</div>
-                <h4>${s.title}</h4>
-                <p><i class="fas fa-users"></i> ${s.section}</p>
-                <div style="margin-top: 1rem; font-size: 0.8rem; color: #6366f1; font-weight: 600;">CLICK TO VIEW & EDIT &rarr;</div>
-                <button class="btn-delete-session" onclick="event.stopPropagation(); deleteSession(${s.id})" title="Delete Session">
-                    <i class="fas fa-trash-alt"></i>
-                </button>
-            `;
-            card.onclick = () => loadSessionDetail(s.id, `${s.title} - ${s.section} (${s.date})`);
-            listEl.appendChild(card);
-        });
+        allHistorySessions = await response.json();
+        renderHistorySections();
     } catch (err) { console.error(err); }
 }
 
-let historyRecords = []; // Local cache for editing
+function renderHistorySections() {
+    const listEl = document.getElementById('history-sessions-list');
+    const mainTitle = document.querySelector('#section-history h1');
+    const backBtn = document.getElementById('btn-back-to-sessions');
+    
+    listEl.innerHTML = '';
+    mainTitle.innerText = "Select Section";
+    backBtn.style.display = 'none';
+    currentHistoryView = 'sections';
+
+    if (allHistorySessions.length === 0) {
+        listEl.innerHTML = '<div class="card" style="grid-column: 1/-1; text-align: center;">No sessions found.</div>';
+        return;
+    }
+
+    // Group by section
+    const sections = [...new Set(allHistorySessions.map(s => s.section))].sort();
+    
+    sections.forEach(sec => {
+        const card = document.createElement('div');
+        card.className = 'history-card';
+        card.style.borderTop = '4px solid #6366f1';
+        card.innerHTML = `
+            <div class="date-badge" style="background:#6366f1;">SECTION</div>
+            <h4 style="margin-top:0.5rem;"><i class="fas fa-users"></i> ${sec}</h4>
+            <p>View all lectures and attendance history for this section.</p>
+            <div style="margin-top: 1rem; font-size: 0.8rem; color: #6366f1; font-weight: 700;">CLICK TO VIEW &rarr;</div>
+        `;
+        card.onclick = () => showTitlesBySection(sec);
+        listEl.appendChild(card);
+    });
+}
+
+function showTitlesBySection(section) {
+    selectedHistorySection = section;
+    currentHistoryView = 'titles';
+    const listEl = document.getElementById('history-sessions-list');
+    const mainTitle = document.querySelector('#section-history h1');
+    const backBtn = document.getElementById('btn-back-to-sessions');
+    
+    listEl.innerHTML = '';
+    mainTitle.innerText = `Lectures in ${section}`;
+    backBtn.style.display = 'block';
+    backBtn.onclick = renderHistorySections;
+    backBtn.innerHTML = '<i class="fas fa-arrow-left"></i> Back to Sections';
+
+    // Group by title within section
+    const sectionLectures = allHistorySessions.filter(s => s.section === section);
+    const titlesMap = {};
+    sectionLectures.forEach(l => {
+        if (!titlesMap[l.title]) titlesMap[l.title] = 0;
+        titlesMap[l.title]++;
+    });
+
+    Object.keys(titlesMap).sort().forEach(title => {
+        const count = titlesMap[title];
+        const card = document.createElement('div');
+        card.className = 'history-card';
+        card.style.borderTop = '4px solid #3b82f6';
+        card.innerHTML = `
+            <div class="date-badge" style="background:#3b82f6;">LECTURE</div>
+            <h4 style="margin-top:0.5rem;">${title}</h4>
+            <p><i class="fas fa-calendar-alt"></i> ${count} sessions recorded</p>
+            <div class="action-row" style="margin-top: 1rem; justify-content: space-between;">
+                <span style="font-size: 0.8rem; color: #3b82f6; font-weight: 700;">VIEW SESSIONS &rarr;</span>
+                <button class="btn-success-glass" onclick="event.stopPropagation(); exportFullLecture('${section}', '${title}')" title="Export Full Semester for this Subject">
+                    <i class="fas fa-file-excel"></i> Export All
+                </button>
+            </div>
+        `;
+        card.onclick = () => showDatesByTitle(section, title);
+        listEl.appendChild(card);
+    });
+}
+
+async function exportFullLecture(section, title) {
+    const url = `/attendance/export-lecture?section=${encodeURIComponent(section)}&title=${encodeURIComponent(title)}`;
+    window.location.href = url;
+}
+
+function showDatesByTitle(section, title) {
+    selectedHistoryTitle = title;
+    currentHistoryView = 'dates';
+    const listEl = document.getElementById('history-sessions-list');
+    const mainTitle = document.querySelector('#section-history h1');
+    const backBtn = document.getElementById('btn-back-to-sessions');
+    
+    listEl.innerHTML = '';
+    mainTitle.innerText = `${title} (${section})`;
+    backBtn.style.display = 'block';
+    backBtn.onclick = () => showTitlesBySection(section);
+    backBtn.innerHTML = '<i class="fas fa-arrow-left"></i> Back to Lectures';
+
+    const sessions = allHistorySessions.filter(s => s.section === section && s.title === title);
+    
+    sessions.forEach(s => {
+        const card = document.createElement('div');
+        card.className = 'history-card';
+        card.innerHTML = `
+            <div class="date-badge">${s.date}</div>
+            <h4 style="margin-top:0.5rem;">Session: ${s.date}</h4>
+            <p><i class="fas fa-clock"></i> Recorded on ${new Date(s.created_at).toLocaleTimeString()}</p>
+            <div style="margin-top: 1rem; font-size: 0.8rem; color: #6366f1; font-weight: 600;">VIEW & EDIT DETAILS &rarr;</div>
+            <button class="btn-delete-session" onclick="event.stopPropagation(); deleteSession(${s.id})" title="Delete Session">
+                <i class="fas fa-trash-alt"></i>
+            </button>
+        `;
+        card.onclick = () => loadSessionDetail(s.id, `${s.title} - ${s.section} (${s.date})`);
+        listEl.appendChild(card);
+    });
+}
+
+let historyRecords = []; 
 
 async function loadSessionDetail(lectureId, titleDisplay) {
     const listEl = document.getElementById('history-sessions-list');
     const detailEl = document.getElementById('history-session-detail');
     const backBtn = document.getElementById('btn-back-to-sessions');
+    const mainTitle = document.querySelector('#section-history h1');
     
     listEl.style.display = 'none';
     detailEl.style.display = 'block';
     backBtn.style.display = 'block';
+    backBtn.onclick = () => {
+        detailEl.style.display = 'none';
+        listEl.style.display = 'grid';
+        showDatesByTitle(selectedHistorySection, selectedHistoryTitle);
+    };
+    backBtn.innerHTML = '<i class="fas fa-arrow-left"></i> Back to Dates';
     
+    mainTitle.innerText = "Attendance Detail";
     document.getElementById('history-detail-title').innerText = titleDisplay;
-    currentLectureId = lectureId; // For export
+    currentLectureId = lectureId; 
     
     try {
         const response = await fetch(`/attendance/details/${lectureId}`);
@@ -557,17 +709,16 @@ function renderHistoryTable() {
 
 function toggleHistoryStatus(index, newStatus) {
     historyRecords[index].status = newStatus;
-    // We update local UI immediately
     renderHistoryTable();
 }
 
-document.getElementById('btn-save-history').addEventListener('click', async () => {
+const btnSaveHistory = document.getElementById('btn-save-history');
+if(btnSaveHistory) btnSaveHistory.addEventListener('click', async () => {
     const btn = document.getElementById('btn-save-history');
     btn.disabled = true;
     btn.innerText = "SAVING...";
     
     try {
-        // We save each record sequentially (or we could make a bulk endpoint, but sequential is safer for now)
         for (const r of historyRecords) {
             await fetch('/attendance/update', {
                 method: 'POST',
@@ -585,9 +736,14 @@ document.getElementById('btn-save-history').addEventListener('click', async () =
     }
 });
 
-document.getElementById('btn-back-to-sessions').addEventListener('click', loadSessions);
+const btnBackToSessions = document.getElementById('btn-back-to-sessions');
+if(btnBackToSessions) btnBackToSessions.addEventListener('click', () => {
+    // This is the global back behavior handled by dynamic onclicks, 
+    // but we can provide a fallback if needed.
+});
 
-document.getElementById('btn-export-history').addEventListener('click', () => {
+const btnExportHistory = document.getElementById('btn-export-history');
+if(btnExportHistory) btnExportHistory.addEventListener('click', () => {
     window.location.href = `/attendance/export/${currentLectureId}`;
 });
 
@@ -609,103 +765,152 @@ async function deleteSession(lectureId) {
     }
 }
 
+let allFetchedStudents = [];
+
 async function loadFetchedStudents() {
-    const listEl = document.getElementById('fetched-sections-list');
-    const detailEl = document.getElementById('fetched-section-detail');
-    const backBtn = document.getElementById('btn-back-to-sections-fetched');
-    
-    if (!listEl || !detailEl || !backBtn) return;
-
-    listEl.style.display = 'grid';
-    detailEl.style.display = 'none';
-    backBtn.style.display = 'none';
-    
-    listEl.innerHTML = '<div class="card" style="grid-column: 1/-1; text-align: center;">Loading sections...</div>';
-    
+    backToFetchedLanding();
     try {
-        const response = await fetch('/students/sections');
-        const sections = await response.json();
-        
-        listEl.innerHTML = '';
-        if (sections.length === 0) {
-            listEl.innerHTML = '<div class="card" style="grid-column: 1/-1; text-align: center;">No student data found. Please upload students first.</div>';
-            return;
-        }
+        const res = await fetch('/students/list');
+        allFetchedStudents = await res.json();
 
-        sections.forEach(s => {
-            const card = document.createElement('div');
-            card.className = 'history-card';
-            card.innerHTML = `
-                <div class="date-badge">SECTION</div>
-                <h4><i class="fas fa-users"></i> ${s}</h4>
-                <p>View all registered students in this section.</p>
-                <div style="margin-top: 1rem; font-size: 0.8rem; color: #6366f1; font-weight: 600;">CLICK TO VIEW STUDENTS &rarr;</div>
-            `;
-            card.onclick = () => loadSectionStudents(s);
-            listEl.appendChild(card);
+        const sections = {};
+        allFetchedStudents.forEach(s => {
+            if (!sections[s.section]) sections[s.section] = [];
+            sections[s.section].push(s);
         });
-    } catch (err) { 
-        console.error(err); 
-        listEl.innerHTML = '<div class="card" style="grid-column: 1/-1; text-align: center; color: #ef4444;">Error loading sections.</div>';
+
+        const sectionNames = Object.keys(sections).sort();
+        
+        renderBleDashboard(sections, sectionNames);
+        renderHotspotDashboard(sections, sectionNames);
+    } catch (err) {
+        console.error("Error loading fetched students:", err);
     }
 }
 
-async function loadSectionStudents(section) {
-    const listEl = document.getElementById('fetched-sections-list');
-    const detailEl = document.getElementById('fetched-section-detail');
-    const backBtn = document.getElementById('btn-back-to-sections-fetched');
-    
-    listEl.style.display = 'none';
-    detailEl.style.display = 'block';
-    backBtn.style.display = 'block';
-    
-    document.getElementById('fetched-detail-title').innerText = `Students in Section: ${section}`;
-    
-    const tbody = document.querySelector('#table-fetched-students tbody');
-    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">Loading students...</td></tr>';
-    
-    try {
-        const response = await fetch(`/students/list?section=${section}`);
-        const students = await response.json();
-        
-        tbody.innerHTML = '';
-        if (students.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;">No students found in this section.</td></tr>';
-            return;
-        }
+function renderBleDashboard(sections, sectionNames) {
+    const container = document.getElementById('ble-sections-container');
+    if (!container) return;
 
-        students.forEach(s => {
-            const row = document.createElement('tr');
-            row.innerHTML = `
-                <td>${s.roll_number}</td>
-                <td>${s.name}</td>
-                <td>
-                    <span class="badge ${s.device_identifier ? 'badge-indigo' : 'status-absent'}">
-                        ${s.device_identifier ? 'Registered' : 'Unregistered'}
-                    </span>
-                </td>
-                <td>${s.device_name || '---'}</td>
-                <td><code style="font-size: 0.8rem;">${s.device_identifier || '---'}</code></td>
-                <td>
-                    <button class="btn-unregister" onclick="unregisterStudent('${s.roll_number}', '${section}')" ${!s.device_identifier ? 'disabled' : ''}>
-                        <i class="fas fa-unlink"></i> Unregister
-                    </button>
-                </td>
-            `;
-            tbody.appendChild(row);
-        });
-    } catch (err) { 
-        console.error(err); 
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color: #ef4444;">Error loading students.</td></tr>';
+    if (sectionNames.length === 0) {
+        container.innerHTML = '<p style="color:var(--text-muted); text-align:center;">No student data found.</p>';
+        return;
     }
+
+    container.innerHTML = '';
+    sectionNames.forEach(section => {
+        const card = document.createElement('div');
+        card.className = 'history-card';
+        card.style.marginBottom = '1rem';
+        card.innerHTML = `
+            <div class="date-badge" style="background:#6366f1; border-bottom-left-radius: 12px; padding: 0.3rem 1.2rem;">SECTION</div>
+            <h4 style="margin-top:0.5rem;"><i class="fas fa-users" style="color:#6366f1; margin-right:0.5rem;"></i> ${section}</h4>
+            <p style="margin-bottom:1rem; font-size:0.85rem;">View all registered students in this section.</p>
+            <div style="color:#6366f1; font-weight:700; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em;">CLICK TO VIEW STUDENTS &rarr;</div>
+        `;
+        card.onclick = () => showBleSectionDetails(section);
+        container.appendChild(card);
+    });
 }
 
-// Event Listeners for Fetched Students
-if (document.getElementById('btn-refresh-students')) {
-    document.getElementById('btn-refresh-students').addEventListener('click', loadFetchedStudents);
+function renderHotspotDashboard(sections, sectionNames) {
+    const container = document.getElementById('hotspot-sections-container');
+    if (!container) return;
+
+    if (sectionNames.length === 0) {
+        container.innerHTML = '<p style="color:var(--text-muted); text-align:center;">No student data found.</p>';
+        return;
+    }
+
+    container.innerHTML = '';
+    sectionNames.forEach(section => {
+        const card = document.createElement('div');
+        card.className = 'history-card';
+        card.style.marginBottom = '1rem';
+        card.innerHTML = `
+            <div class="date-badge" style="background:#3b82f6; border-bottom-left-radius: 12px; padding: 0.3rem 1.2rem;">SECTION</div>
+            <h4 style="margin-top:0.5rem;"><i class="fas fa-users" style="color:#3b82f6; margin-right:0.5rem;"></i> ${section}</h4>
+            <p style="margin-bottom:1rem; font-size:0.85rem;">View all registered students in this section.</p>
+            <div style="color:#3b82f6; font-weight:700; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.05em;">CLICK TO VIEW STUDENTS &rarr;</div>
+        `;
+        card.onclick = () => showHotspotSectionDetails(section);
+        container.appendChild(card);
+    });
 }
-if (document.getElementById('btn-back-to-sections-fetched')) {
-    document.getElementById('btn-back-to-sections-fetched').addEventListener('click', loadFetchedStudents);
+
+function backToFetchedLanding() {
+    const landing = document.getElementById('fetched-landing-view');
+    const detail = document.getElementById('fetched-detail-view');
+    if (landing) landing.style.display = 'grid';
+    if (detail) detail.style.display = 'none';
+}
+
+function showBleSectionDetails(section) {
+    const landingView = document.getElementById('fetched-landing-view');
+    const detailView = document.getElementById('fetched-detail-view');
+    const thead = document.getElementById('fetched-detail-thead');
+    const tbody = document.getElementById('fetched-detail-tbody');
+    const title = document.getElementById('fetched-detail-header-title');
+
+    landingView.style.display = 'none';
+    detailView.style.display = 'block';
+    
+    title.innerText = `BLE Registrations: ${section}`;
+    thead.innerHTML = '<tr><th>Roll Number</th><th>Name</th><th>Section</th><th>MAC/UUID</th><th>Status</th><th>Action</th></tr>';
+    
+    const students = allFetchedStudents.filter(s => s.section === section);
+    tbody.innerHTML = students.map(s => `
+        <tr>
+            <td>${s.roll_number}</td>
+            <td>${s.name}</td>
+            <td>${s.section}</td>
+            <td><code style="font-size:0.75rem;">${s.device_identifier || '---'}</code></td>
+            <td>
+                <span class="${s.device_identifier ? 'status-present' : 'status-absent'}" style="background:${s.device_identifier ? 'rgba(99,102,241,0.1)' : 'rgba(239,68,68,0.1)'}; color:${s.device_identifier ? '#6366f1' : '#ef4444'}">
+                    ${s.device_identifier ? '✅ registered' : '🔴 unregistered'}
+                </span>
+            </td>
+            <td>
+                <button class="btn-unregister" onclick="unregisterStudent('${s.roll_number}', '${section}')" ${!s.device_identifier ? 'disabled' : ''}>
+                    <i class="fas fa-unlink"></i> Unregister
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+function showHotspotSectionDetails(section) {
+    const landingView = document.getElementById('fetched-landing-view');
+    const detailView = document.getElementById('fetched-detail-view');
+    const thead = document.getElementById('fetched-detail-thead');
+    const tbody = document.getElementById('fetched-detail-tbody');
+    const title = document.getElementById('fetched-detail-header-title');
+
+    landingView.style.display = 'none';
+    detailView.style.display = 'block';
+
+    title.innerText = `Hotspot Registrations: ${section}`;
+    thead.innerHTML = '<tr><th>Roll Number</th><th>Name</th><th>Section</th><th>Wi-Fi MAC</th><th>Status</th><th>Action</th></tr>';
+
+    const students = allFetchedStudents.filter(s => s.section === section);
+    tbody.innerHTML = students.map(s => `
+        <tr>
+            <td>${s.roll_number}</td>
+            <td>${s.name}</td>
+            <td>${s.section}</td>
+            <td><code style="font-size:0.75rem;">${s.wifi_mac || '---'}</code></td>
+            <td>
+                <span class="${s.wifi_mac ? 'status-present' : 'status-absent'}" style="background:${s.wifi_mac ? 'rgba(59,130,246,0.1)' : 'rgba(239,68,68,0.1)'}; color:${s.wifi_mac ? '#3b82f6' : '#ef4444'}">
+                    ${s.wifi_mac ? '✅ registered' : '🔴 unregistered'}
+                </span>
+            </td>
+            <td>
+                <button class="btn-unregister" onclick="unassignWifiMac(${s.id}, '${section}')" ${!s.wifi_mac ? 'disabled' : ''}>
+                    <i class="fas fa-trash"></i> Unassign
+                </button>
+            </td>
+        </tr>
+    `).join('');
 }
 
 async function unregisterStudent(rollNumber, sectionContext = null) {
@@ -714,28 +919,446 @@ async function unregisterStudent(rollNumber, sectionContext = null) {
     }
     
     try {
-        const response = await fetch('/bluetooth/unregister', {
+        const response = await fetch(`/students/unregister/${rollNumber}`, { method: 'DELETE' });
+        if (response.ok) {
+            if (sectionContext) {
+                await loadFetchedStudents(); 
+                showBleSectionDetails(sectionContext);
+            } else {
+                const section = document.getElementById('reg-section').value;
+                if (section) loadStudentPreview(section);
+            }
+        }
+    } catch (err) { console.error(err); }
+}
+
+async function unassignWifiMac(studentId, sectionContext = null) {
+    if (!confirm(`Are you sure you want to unassign Wi-Fi MAC for this student?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/wifi/unassign/${studentId}`, { method: 'DELETE' });
+        if (response.ok) {
+            if (sectionContext) {
+                await loadFetchedStudents();
+                showHotspotSectionDetails(sectionContext);
+            } else {
+                if (wifiLoadedSection) loadWifiSectionData(wifiLoadedSection);
+            }
+        }
+    } catch (err) { console.error(err); }
+}
+
+// WI-FI REGISTRATION LOGIC
+const wifiDropZone = document.getElementById('wifi-drop-zone');
+const wifiFileInput = document.getElementById('wifi-student-file');
+
+// Drag and drop events for Wi-Fi
+['dragover', 'dragenter'].forEach(eventName => {
+    if(wifiDropZone) wifiDropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        wifiDropZone.style.borderColor = '#a855f7';
+        wifiDropZone.style.background = 'rgba(255, 255, 255, 0.4)';
+    });
+});
+
+['dragleave', 'drop'].forEach(eventName => {
+    if(wifiDropZone) wifiDropZone.addEventListener(eventName, (e) => {
+        e.preventDefault();
+        wifiDropZone.style.borderColor = '#6366f1';
+        wifiDropZone.style.background = 'rgba(255, 255, 255, 0.2)';
+    });
+});
+
+if(wifiDropZone) wifiDropZone.addEventListener('drop', (e) => {
+    const dt = e.dataTransfer;
+    const files = dt.files;
+    if (files.length > 0) {
+        wifiFileInput.files = files;
+        updateWifiFileDisplay(files[0]);
+    }
+});
+
+if(wifiFileInput) wifiFileInput.addEventListener('change', () => {
+    if (wifiFileInput.files.length > 0) {
+        updateWifiFileDisplay(wifiFileInput.files[0]);
+    }
+});
+
+function updateWifiFileDisplay(file) {
+    const def = document.getElementById('wifi-upload-content-default');
+    const ready = document.getElementById('wifi-upload-content-ready');
+    const nameDisp = document.getElementById('wifi-file-name-display');
+    const status = document.getElementById('wifi-upload-status');
+    
+    if(def) def.style.display = 'none';
+    if(ready) ready.style.display = 'flex';
+    if(nameDisp) nameDisp.innerText = file.name;
+    if(status) status.innerText = "";
+}
+
+// Handle remove button
+document.addEventListener('click', (e) => {
+    if(e.target && e.target.id === 'wifi-btn-remove-file') {
+        e.preventDefault();
+        const wifiInput = document.getElementById('wifi-student-file');
+        if(wifiInput) wifiInput.value = "";
+        const def = document.getElementById('wifi-upload-content-default');
+        const ready = document.getElementById('wifi-upload-content-ready');
+        const status = document.getElementById('wifi-upload-status');
+        if(def) def.style.display = 'flex';
+        if(ready) ready.style.display = 'none';
+        if(status) status.innerText = "File removed";
+    }
+});
+
+const btnWifiUpload = document.getElementById('btn-wifi-upload');
+if(btnWifiUpload) btnWifiUpload.addEventListener('click', async () => {
+    const section = document.getElementById('wifi-reg-section').value;
+    const fileInput = document.getElementById('wifi-student-file');
+    const file = fileInput ? fileInput.files[0] : null;
+    
+    if (!section || !file) {
+        alert("Please provide section and select an Excel file.");
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('section', section);
+    formData.append('file', file);
+    
+    btnWifiUpload.disabled = true;
+    const status = document.getElementById('wifi-upload-status');
+    if(status) status.innerText = "Uploading...";
+
+    try {
+        const response = await fetch('/students/upload', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ roll_number: rollNumber })
+            body: formData
         });
+        const data = await response.json();
+        if(status) status.innerText = data.message;
         
         if (response.ok) {
-            // Refresh the relevant view
-            if (sectionContext) {
-                loadSectionStudents(sectionContext);
-            } else {
-                // Try to find the section from the preview card if we're in the register tab
-                const regSection = document.getElementById('reg-section').value;
-                if (regSection) loadStudentPreview(regSection);
-                else location.reload();
-            }
+            document.getElementById('wifi-reg-upload-state').style.display = 'none';
+            document.getElementById('wifi-reg-scan-state').style.display = 'block';
+            document.getElementById('wifi-reg-list-card').style.display = 'block';
+            const loadedSectionSpan = document.getElementById('wifi-reg-loaded-section');
+            if(loadedSectionSpan) loadedSectionSpan.innerText = section;
+            loadWifiSectionData(section);
+        }
+    } catch (err) {
+        if(status) status.innerText = "Upload failed: " + err;
+    } finally {
+        btnWifiUpload.disabled = false;
+    }
+});
+
+let wifiLoadedSection = null;
+async function loadWifiSectionData(section) {
+    wifiLoadedSection = section;
+    const response = await fetch(`/students/list?section=${section}`);
+    const students = await response.json();
+    
+    const tbody = document.getElementById('wifi-registered-table-body');
+    tbody.innerHTML = '';
+    
+    // Store only for dropdown usage (unregistered students)
+    wifiCurrentSectionStudents = students;
+    
+    // Show only registered students in the list card
+    students.filter(s => s.wifi_mac).forEach(s => {
+        const row = `<tr>
+            <td>${s.roll_number}</td>
+            <td>${s.name}</td>
+            <td><code style="font-size:0.75rem;">${s.wifi_mac}</code></td>
+            <td>
+                <button class="btn-unregister" onclick="unassignWifiMac(${s.id})" title="Unassign MAC">
+                    <i class="fas fa-trash"></i> Unassign
+                </button>
+            </td>
+        </tr>`;
+        tbody.innerHTML += row;
+    });
+}
+
+const btnWifiRegScan = document.getElementById('btn-wifi-scan');
+if(btnWifiRegScan) btnWifiRegScan.addEventListener('click', async () => {
+    const btn = document.getElementById('btn-wifi-scan');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Scanning...';
+    
+    try {
+        const res = await fetch('/wifi/scan-devices');
+        const data = await res.json();
+        renderWifiScanTable(data.devices || []);
+    } catch (err) { console.error(err); }
+    finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fas fa-search"></i> Scan Connected Devices';
+    }
+});
+
+function renderWifiScanTable(devices) {
+    const tbody = document.getElementById('wifi-devices-table-body');
+    if(!tbody) return;
+    tbody.innerHTML = '';
+    
+    if (devices.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding:2rem;">No new devices detected. Ensure students are connected to your hotspot.</td></tr>';
+        return;
+    }
+
+    // Build options string once
+    const options = '<option value="">Select Student</option>' + 
+        wifiCurrentSectionStudents.filter(s => !s.wifi_mac).map(s => 
+            `<option value="${s.id}">${s.roll_number} - ${s.name}</option>`
+        ).join('');
+
+    devices.forEach((d, i) => {
+        const selectId = `wifi-select-student-${i}`;
+        const row = `<tr>
+            <td><small>${d.name || d.ip}</small></td>
+            <td><code style="font-size:0.85rem;">${d.mac}</code></td>
+            <td>
+                <select id="${selectId}" class="form-control" style="padding: 0.4rem; width: 100%; border-radius: 8px; border: 1px solid #e5e7eb;">
+                    ${options}
+                </select>
+            </td>
+            <td>
+                <button class="btn-primary" onclick="assignWifiMac('${d.mac}', '${selectId}', this)">
+                    <i class="fas fa-link"></i> Assign
+                </button>
+            </td>
+        </tr>`;
+        tbody.innerHTML += row;
+    });
+}
+
+async function assignWifiMac(mac, selectId, btn) {
+    const studentId = document.getElementById(selectId).value;
+    if (!studentId) {
+        alert("Please select a student first.");
+        return;
+    }
+    
+    try {
+        const res = await fetch('/wifi/assign', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ student_id: parseInt(studentId), mac: mac })
+        });
+        
+        if (res.ok) {
+            const row = btn.closest('tr');
+            if (row) row.remove();
+            await loadWifiSectionData(wifiLoadedSection);
         } else {
-            const err = await response.json();
-            alert(err.detail || "Failed to unregister student.");
+            const data = await res.json();
+            alert(data.detail || "Error assigning MAC.");
         }
     } catch (err) {
         console.error(err);
-        alert("Error unregistering student.");
+        alert("Error assigning MAC.");
     }
 }
+
+// WI-FI ATTENDANCE LOGIC
+async function loadWifiAttendanceSections() {
+    try {
+        const response = await fetch('/students/sections');
+        const sections = await response.json();
+        const dropdown = document.getElementById('wifi-att-section-dropdown');
+        if (!dropdown) return;
+        dropdown.innerHTML = '';
+        sections.forEach(s => {
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = s;
+            dropdown.appendChild(opt);
+        });
+    } catch (err) { console.error(err); }
+}
+
+async function checkWifiAttendanceStatus() {
+    try {
+        const res = await fetch('/wifi-attendance/status');
+        const data = await res.json();
+        
+        if (data.session_active && data.lecture_id) {
+            currentLectureId = data.lecture_id;
+            
+            if (document.getElementById('wifi-att-active').style.display !== 'block') {
+                document.getElementById('wifi-att-setup').style.display = 'none';
+                document.getElementById('wifi-att-active').style.display = 'block';
+                
+                if (!wifiTimerInterval) {
+                    startWifiLocalTimer();
+                }
+                if (!wifiAttendanceInterval) {
+                    wifiAttendanceInterval = setInterval(checkWifiAttendanceStatus, 5000);
+                }
+            }
+
+            // Sync local time with server authoritative time only if drift is significant (> 10s)
+            if (Math.abs(wifiTimeRemaining - data.time_remaining) > 10) {
+                wifiTimeRemaining = data.time_remaining;
+            }
+
+            updateWifiAttendanceUI(data);
+
+            if (data.time_remaining <= 0) {
+                stopWifiAttendanceUI(true);
+            }
+        } else if (!data.session_active && currentLectureId) {
+            stopWifiAttendanceUI();
+            document.getElementById('wifi-att-active').style.display = 'none';
+            document.getElementById('wifi-att-setup').style.display = 'none';
+            document.getElementById('wifi-session-complete').style.display = 'block';
+        }
+    } catch(e) { console.error("Poll Error:", e); }
+}
+
+// BUG FIX 2: Local 1s timer for smooth countdown
+function startWifiLocalTimer() {
+    if (wifiTimerInterval) clearInterval(wifiTimerInterval);
+    wifiTimerInterval = setInterval(() => {
+        if (wifiTimeRemaining > 0) {
+            wifiTimeRemaining--;
+            renderWifiTimer();
+        } else {
+            stopWifiAttendanceUI(true);
+        }
+    }, 1000);
+}
+
+function renderWifiTimer() {
+    const timerDisplay = document.getElementById('wifi-attendance-timer');
+    if (timerDisplay) {
+        const mins = Math.floor(wifiTimeRemaining / 60);
+        const secs = wifiTimeRemaining % 60;
+        timerDisplay.innerText = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+}
+
+function updateWifiAttendanceUI(data) {
+    const tbodyAbsent = document.querySelector('#wifi-table-absent tbody');
+    const tbodyPresent = document.querySelector('#wifi-table-present tbody');
+    if (tbodyAbsent && tbodyPresent) {
+        tbodyAbsent.innerHTML = (data.absent || []).map(s => `<tr><td>${s.roll_number}</td><td>${s.name}</td></tr>`).join('');
+        tbodyPresent.innerHTML = (data.present || []).map(s => `<tr><td>${s.roll_number}</td><td>${s.name}</td></tr>`).join('');
+    }
+
+    const total = (data.present?.length || 0) + (data.absent?.length || 0);
+    const statsEl = document.getElementById('wifi-session-stats');
+    if(statsEl) {
+        statsEl.innerText = `${data.present?.length || 0} present, ${data.absent?.length || 0} absent out of ${total} students`;
+    }
+}
+
+function stopWifiAttendanceUI(fromTimer = false) {
+    if (wifiAttendanceInterval) clearInterval(wifiAttendanceInterval);
+    wifiAttendanceInterval = null;
+    if (wifiTimerInterval) clearInterval(wifiTimerInterval);
+    wifiTimerInterval = null;
+    
+    if (fromTimer) {
+        fetch('/wifi-attendance/stop', { method: 'POST' }).catch(e => console.error(e));
+        document.getElementById('wifi-att-active').style.display = 'none';
+        document.getElementById('wifi-att-setup').style.display = 'none';
+        document.getElementById('wifi-session-complete').style.display = 'block';
+    }
+}
+
+const btnWifiAttNext = document.getElementById('btn-wifi-att-next');
+if(btnWifiAttNext) btnWifiAttNext.addEventListener('click', async () => {
+    const title = document.getElementById('wifi-att-title').value;
+    const date = document.getElementById('wifi-att-date').value;
+    const section = document.getElementById('wifi-att-section-dropdown').value;
+    const duration = document.getElementById('wifi-att-duration').value;
+    
+    if (!title || !date || !section) {
+        alert("Please fill all fields.");
+        return;
+    }
+    
+    const response = await fetch('/wifi-attendance/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, date, section, duration: parseInt(duration) })
+    });
+    
+    if (response.ok) {
+        const data = await response.json();
+        currentLectureId = data.lecture_id;
+        document.getElementById('wifi-att-setup').style.display = 'none';
+        document.getElementById('wifi-att-active').style.display = 'block';
+        document.getElementById('wifi-active-lecture-title').innerText = `${title} - ${section}`;
+        
+        wifiTimeRemaining = parseInt(duration) * 60; 
+        startWifiLocalTimer();
+        if (wifiAttendanceInterval) clearInterval(wifiAttendanceInterval);
+        wifiAttendanceInterval = setInterval(checkWifiAttendanceStatus, 5000);    } else {
+        const err = await response.json();
+        alert(err.detail);
+    }
+});
+
+const btnWifiAttStop = document.getElementById('btn-wifi-att-stop');
+if(btnWifiAttStop) btnWifiAttStop.addEventListener('click', async () => {
+    stopWifiAttendanceUI();
+    try {
+        await fetch('/wifi-attendance/stop', { method: 'POST' });
+    } catch(e) { console.error(e); }
+    
+    document.getElementById('wifi-att-active').style.display = 'none';
+    document.getElementById('wifi-att-setup').style.display = 'none';
+    document.getElementById('wifi-session-complete').style.display = 'block';
+});
+
+const btnWifiExportYes = document.getElementById('btn-wifi-export-yes');
+if(btnWifiExportYes) btnWifiExportYes.addEventListener('click', () => {
+    window.location.href = `/attendance/export/${currentLectureId}`;
+    setTimeout(() => location.reload(), 1500);
+});
+
+const btnWifiExportNo = document.getElementById('btn-wifi-export-no');
+if(btnWifiExportNo) btnWifiExportNo.addEventListener('click', () => {
+    location.reload();
+});
+
+let wifiStatusInterval = null;
+function startWifiStatusPolling() {
+    if (wifiStatusInterval) clearInterval(wifiStatusInterval);
+    const checkStatus = async () => {
+        try {
+            const response = await fetch('/wifi/hotspot-status');
+            const data = await response.json();
+            ['wifi-reg-hotspot-status'].forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                if (data.active) {
+                    el.className = 'hotspot-status-bar green';
+                    el.innerHTML = `<i class="fas fa-check-circle"></i> Hotspot Active — Students can connect (Gateway: ${data.ip})`;
+                } else {
+                    el.className = 'hotspot-status-bar red';
+                    el.innerHTML = `<i class="fas fa-exclamation-triangle"></i> Hotspot Not Active — Please enable Windows Mobile Hotspot`;
+                }
+            });
+        } catch (err) {}
+    };
+    checkStatus();
+    wifiStatusInterval = setInterval(checkStatus, 3000);
+}
+
+const savedTab = localStorage.getItem('activeTab');
+if (savedTab) {
+    switchTab(savedTab);
+} else {
+    switchTab('register');
+}
+
+const wifiAttDateInput = document.getElementById('wifi-att-date');
+if(wifiAttDateInput) wifiAttDateInput.valueAsDate = new Date();
+if(currentTab === 'wifi-attendance') loadWifiAttendanceSections();

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 import models
 from services.ble_service import ble_service
-from services.excel_service import export_attendance_to_excel
+from services.excel_service import export_attendance_to_excel, export_matrix_attendance_to_excel
 from pydantic import BaseModel
 from datetime import date as date_obj
 from sqlalchemy.sql import func
@@ -15,14 +15,15 @@ class StartSession(BaseModel):
     title: str
     date: date_obj
     section: str
+    duration: int = 5
 
 active_sessions = {} # lecture_id: task
 
-async def attendance_background_task(lecture_id: int, db_session_factory):
-    # This task runs for 2 minutes or until cancelled
+async def attendance_background_task(lecture_id: int, duration_mins: int, db_session_factory):
+    # This task runs for X minutes or until cancelled
     try:
         await ble_service.start_scan()
-        end_time = asyncio.get_event_loop().time() + 120 # 2 minutes
+        end_time = asyncio.get_event_loop().time() + (duration_mins * 60)
         
         while asyncio.get_event_loop().time() < end_time and ble_service.is_scanning:
             devices = await ble_service.get_discovered_devices()
@@ -116,7 +117,7 @@ async def start_attendance(data: StartSession, db: Session = Depends(get_db)):
     
     # 3. Start background task
     from database import SessionLocal
-    task = asyncio.create_task(attendance_background_task(lecture.id, SessionLocal))
+    task = asyncio.create_task(attendance_background_task(lecture.id, data.duration, SessionLocal))
     active_sessions[lecture.id] = task
     
     return {"lecture_id": lecture.id}
@@ -159,8 +160,7 @@ def export_attendance(lecture_id: int, db: Session = Depends(get_db)):
             "Name": a.student.name,
             "Section": lecture.section,
             "Date": lecture.date.strftime("%Y-%m-%d"),
-            "Status": a.status,
-            "Marked At": a.marked_at.strftime("%H:%M:%S") if a.marked_at else lecture.created_at.strftime("%H:%M:%S")
+            "Status": 'P' if a.status == 'present' else 'A'
         })
     
     content, filename = export_attendance_to_excel(data, lecture.section, lecture.date, lecture.title)
@@ -173,8 +173,63 @@ def export_attendance(lecture_id: int, db: Session = Depends(get_db)):
 
 @router.get("/sessions")
 def get_all_sessions(db: Session = Depends(get_db)):
-    # Fetch all lectures ordered by date descending
-    return db.query(models.Lecture).order_by(models.Lecture.date.desc()).all()
+    """Fetch all lectures grouped by section and title for the hierarchy."""
+    lectures = db.query(models.Lecture).order_by(models.Lecture.date.desc()).all()
+    
+    # We return the flat list, and the frontend will handle grouping for the 3-level UI
+    return lectures
+
+@router.get("/export-lecture")
+def export_full_lecture(section: str, title: str, db: Session = Depends(get_db)):
+    """Export all attendance records for a specific lecture title in a section as a matrix."""
+    # 1. Fetch all students in this section
+    students = db.query(models.Student).filter(
+        models.Student.section == section
+    ).order_by(models.Student.roll_number.asc()).all()
+    
+    if not students:
+        raise HTTPException(status_code=404, detail="No students found in this section")
+
+    # 2. Fetch all lectures for this title and section
+    lectures = db.query(models.Lecture).filter(
+        models.Lecture.section == section,
+        models.Lecture.title == title
+    ).order_by(models.Lecture.date.asc()).all()
+    
+    if not lectures:
+        raise HTTPException(status_code=404, detail="No lectures found for this title and section")
+        
+    lecture_ids = [l.id for l in lectures]
+    date_cols = [l.date.strftime("%Y-%m-%d") for l in lectures]
+    
+    # 3. Fetch all attendance records
+    attendance = db.query(models.Attendance).filter(
+        models.Attendance.lecture_id.in_(lecture_ids)
+    ).all()
+    
+    # Map (student_id, lecture_id) -> status
+    att_map = {(a.student_id, a.lecture_id): a.status for a in attendance}
+    
+    # 4. Prepare Matrix Data
+    matrix_data = []
+    for s in students:
+        row = {
+            "Roll Number": s.roll_number,
+            "Name": s.name,
+            "Section": s.section
+        }
+        for l in lectures:
+            status = att_map.get((s.id, l.id), 'absent')
+            row[l.date.strftime("%Y-%m-%d")] = 'P' if status == 'present' else 'A'
+        matrix_data.append(row)
+    
+    content, filename = export_matrix_attendance_to_excel(matrix_data, section, title, date_cols)
+    
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
+    )
 
 @router.get("/details/{lecture_id}")
 def get_session_details(lecture_id: int, db: Session = Depends(get_db)):

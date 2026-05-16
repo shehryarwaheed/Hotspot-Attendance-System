@@ -45,3 +45,14 @@ def list_students(section: str = None, db: Session = Depends(get_db)):
 def get_sections(db: Session = Depends(get_db)):
     sections = db.query(models.Student.section).distinct().all()
     return [s[0] for s in sections]
+
+@router.delete("/unregister/{roll_number}")
+def unregister_student(roll_number: str, db: Session = Depends(get_db)):
+    student = db.query(models.Student).filter(models.Student.roll_number == roll_number).first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+    
+    student.device_identifier = None
+    student.device_name = None
+    db.commit()
+    return {"message": f"Student {roll_number} unregistered successfully"}

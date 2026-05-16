@@ -6,10 +6,13 @@ from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse
 import models
 from database import engine
-from routers import students, bluetooth, attendance
+from routers import students, bluetooth, attendance, wifi_registration, wifi_attendance
+
 import uvicorn
 import webbrowser
 from threading import Timer
+from services.ble_service import ble_service
+
 
 # Handle paths for PyInstaller
 if getattr(sys, 'frozen', False):
@@ -29,6 +32,9 @@ templates = Jinja2Templates(directory=os.path.join(base_path, "templates"))
 app.include_router(students.router)
 app.include_router(bluetooth.router)
 app.include_router(attendance.router)
+app.include_router(wifi_registration.router)
+app.include_router(wifi_attendance.router)
+
 
 @app.get("/ble/devices")
 async def get_ble_devices():

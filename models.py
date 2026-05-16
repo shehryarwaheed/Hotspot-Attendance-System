@@ -12,6 +12,8 @@ class Student(Base):
     section = Column(String(50), nullable=False)
     device_identifier = Column(String(200), nullable=True)
     device_name = Column(String(100), nullable=True)
+    wifi_mac = Column(String(50), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     attendance_records = relationship("Attendance", back_populates="student")

@@ -36,6 +36,87 @@
             font-size: 0.75rem;
             font-weight: 600;
         }
+        .hotspot-status-bar {
+            padding: 1rem;
+            border-radius: 12px;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .hotspot-status-bar.green {
+            background: rgba(34, 197, 94, 0.1);
+            color: #15803d;
+            border: 1px solid rgba(34, 197, 94, 0.2);
+        }
+        .hotspot-status-bar.red {
+            background: rgba(239, 68, 68, 0.1);
+            color: #b91c1c;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        .instruction-panel {
+            background: rgba(99, 102, 241, 0.05) !important;
+            border-left: 4px solid #6366f1 !important;
+            display: flex !important;
+            gap: 1rem !important;
+            align-items: flex-start !important;
+        }
+        .instruction-panel i {
+            color: #6366f1;
+            font-size: 1.25rem;
+            margin-top: 0.25rem;
+        }
+        .instruction-panel p {
+            margin: 0;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            color: #4b5563;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+        .stat-card {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .stat-label {
+            font-size: 0.85rem;
+            color: #6b7280;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 800;
+            color: #1f2937;
+        }
+        .stat-card.present .stat-value { color: #22c55e; }
+        .stat-card.absent .stat-value { color: #ef4444; }
+        .stat-card.devices .stat-value { color: #3b82f6; }
+        
+        .btn-success-glass {
+            background: rgba(34, 197, 94, 0.1);
+            color: #15803d;
+            border: 1px solid rgba(34, 197, 94, 0.2);
+            padding: 0.6rem 1.2rem;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .btn-success-glass:hover {
+            background: rgba(34, 197, 94, 0.2);
+        }
+
     </style>
 </head>
 <body>
@@ -46,7 +127,7 @@
                 <h2>Attendance System</h2>
             </div>
             <ul class="nav-links">
-                <li id="tab-register" class="active" onclick="switchTab('register')">
+                <li id="tab-register" onclick="switchTab('register')">
                     <i class="fas fa-id-card"></i> Register Students
                 </li>
                 <li id="tab-attendance" onclick="switchTab('attendance')">
@@ -58,13 +139,20 @@
                 <li id="tab-fetched" onclick="switchTab('fetched')">
                     <i class="fas fa-users"></i> Fetched Students
                 </li>
+                <li id="tab-wifi-registration" onclick="switchTab('wifi-registration')">
+                    <i class="fas fa-wifi"></i> Wi-Fi Registration
+                </li>
+                <li id="tab-wifi-attendance" onclick="switchTab('wifi-attendance')">
+                    <i class="fas fa-network-wired"></i> Wi-Fi Attendance
+                </li>
+
             </ul>
         </nav>
 
         <!-- Main Content -->
         <main class="content">
             <!-- Register Students Tab -->
-            <section id="section-register" class="tab-content active">
+            <section id="section-register" class="tab-content">
                 <h1>Register Students</h1>
                 
                 <div class="card">
@@ -174,6 +262,10 @@
                         <label for="att-section">Section</label>
                         <select id="att-section-dropdown"></select>
                     </div>
+                    <div class="form-group">
+                        <label for="att-duration">Session Duration (Minutes): <span id="att-duration-val" style="color: #6366f1; font-weight: 800;">5</span></label>
+                        <input type="range" id="att-duration" min="2" max="10" value="5" step="1" oninput="document.getElementById('att-duration-val').innerText = this.value" style="accent-color: #6366f1; cursor: pointer;">
+                    </div>
                     <button id="btn-att-next" class="btn-primary">NEXT &rarr;</button>
                     <div id="att-guard-msg" class="status-msg danger"></div>
                 </div>
@@ -281,43 +373,231 @@
                 </div>
             </section>
 
-            <!-- Fetched Students Tab -->
             <section id="section-fetched" class="tab-content">
-                <div class="header-with-action">
-                    <h1>Fetched Students</h1>
-                    <div style="display: flex; gap: 1rem; align-items: center;">
-                        <button id="btn-back-to-sections-fetched" class="btn-secondary-glass" style="display:none;"><i class="fas fa-arrow-left"></i> Back to Sections</button>
-                        <button id="btn-refresh-students" class="btn-primary">
-                            <i class="fas fa-sync-alt"></i> Refresh
-                        </button>
+                <h1>Fetched Students</h1>
+
+                <!-- Landing View: Two Primary Cards -->
+                <div id="fetched-landing-view" style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start;">
+
+                    <!-- LEFT: BLE Primary Card -->
+                    <div class="card" style="border-top: 4px solid #6366f1;">
+                        <h2 style="color:#6366f1; margin-bottom: 1.5rem;">
+                            <i class="fas fa-bluetooth-b"></i> BLE Registered
+                        </h2>
+                        <div id="ble-sections-container">
+                            <p style="color:var(--text-muted); text-align:center;">Loading...</p>
+                        </div>
                     </div>
+
+                    <!-- RIGHT: Hotspot Primary Card -->
+                    <div class="card" style="border-top: 4px solid #3b82f6;">
+                        <h2 style="color:#3b82f6; margin-bottom: 1.5rem;">
+                            <i class="fas fa-wifi"></i> Hotspot Based
+                        </h2>
+                        <div id="hotspot-sections-container">
+                            <p style="color:var(--text-muted); text-align:center;">Loading...</p>
+                        </div>
+                    </div>
+
                 </div>
 
-                <!-- Sections List (Cards) -->
-                <div id="fetched-sections-list" class="history-grid"></div>
-
-                <!-- Section Detail (Table) -->
-                <div id="fetched-section-detail" style="display:none;">
+                <!-- Full-Width Detail View: Hidden by Default -->
+                <div id="fetched-detail-view" style="display:none;">
                     <div class="card">
-                        <h3 id="fetched-detail-title">Section Students</h3>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem;">
+                            <h3 id="fetched-detail-header-title" style="margin:0;">Section Details</h3>
+                            <button class="btn-secondary-glass" onclick="backToFetchedLanding()"><i class="fas fa-arrow-left"></i> Back to Sections</button>
+                        </div>
                         <div class="table-container">
-                            <table id="table-fetched-students">
-                                <thead>
-                                    <tr>
-                                        <th>Roll Number</th>
-                                        <th>Name</th>
-                                        <th>Status</th>
-                                        <th>Device Name</th>
-                                        <th>MAC/UUID</th>
-                                        <th>Action</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
+                            <table id="fetched-detail-table">
+                                <thead id="fetched-detail-thead"></thead>
+                                <tbody id="fetched-detail-tbody"></tbody>
                             </table>
                         </div>
                     </div>
                 </div>
             </section>
+
+            <!-- Wi-Fi Registration Tab -->
+            <section id="section-wifi-registration" class="tab-content">
+                <h1>Wi-Fi Registration</h1>
+
+                <!-- Hotspot Status Card -->
+                <div class="card">
+                    <h3>Hotspot Status</h3>
+                    <div id="wifi-reg-hotspot-status" class="hotspot-status-bar red">
+                        <i class="fas fa-exclamation-triangle"></i> Hotspot Not Active — Please enable Windows Mobile Hotspot
+                    </div>
+                </div>
+
+                <!-- State 1: Upload (shown first) -->
+                <div id="wifi-reg-upload-state" class="card">
+                    <h3>Step 1: Load Class List</h3>
+                    <p style="color: #6b7280; margin-bottom: 1rem;">
+                        Upload the same Excel file for the section you want to register via Wi-Fi.
+                    </p>
+                    <div class="form-group">
+                        <label for="wifi-reg-section">Section Name</label>
+                        <input type="text" id="wifi-reg-section" placeholder="e.g. BSE-4B">
+                    </div>
+                    <div class="upload-box" id="wifi-drop-zone">
+                        <input type="file" id="wifi-student-file" accept=".xlsx" style="display:none;">
+                        <div class="upload-content" id="wifi-upload-content-default">
+                            <i class="fas fa-cloud-upload-alt"></i>
+                            <p>Drag and Drop File here</p>
+                            <label for="wifi-student-file" class="btn-secondary-glass">Choose File</label>
+                        </div>
+                        <div class="upload-content" id="wifi-upload-content-ready" style="display:none;">
+                            <i class="fas fa-file-excel ready-icon"></i>
+                            <div class="file-info-row">
+                                <div class="file-badge" id="wifi-file-name-display">Filename.xlsx</div>
+                                <button class="btn-remove" id="wifi-btn-remove-file" title="Remove file">&times;</button>
+                            </div>
+                            <p class="status-ready">FILE READY TO PARSE</p>
+                            <label for="wifi-student-file" class="change-link">Change file</label>
+                        </div>
+                    </div>
+                    <button id="btn-wifi-upload" class="btn-primary full-width" style="margin-top: 1rem;">Upload & Load Students</button>
+                    <div id="wifi-upload-status" class="status-msg"></div>
+                </div>
+
+                <!-- State 2: Scan & Assign (shown after successful upload) -->
+                <div id="wifi-reg-scan-state" class="card" style="display:none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                        <h3 style="margin-bottom: 0;">Step 2: Scan & Assign MACs</h3>
+                        <button id="btn-wifi-scan" class="btn-primary">
+                            <i class="fas fa-search"></i> Scan Connected Devices
+                        </button>
+                    </div>
+
+                    <!-- Teacher Instructions -->
+                    <div class="card instruction-banner" style="background: rgba(59, 130, 246, 0.1); border-left: 4px solid #3b82f6; margin-bottom: 1.5rem;">
+                        <h4 style="color: #1e40af; margin-bottom: 0.5rem;"><i class="fas fa-info-circle"></i> Student Setup Instructions</h4>
+                        <p style="font-size: 0.85rem; color: #1e40af; line-height: 1.5; margin: 0;">Ask each student to connect to the hotspot, then click Scan. Select the student name from the dropdown for their device and click Assign.</p>
+                    </div>
+
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Device IP / Name</th>
+                                    <th>MAC Address</th>
+                                    <th>Assign To Student</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="wifi-devices-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- State 3: Registered table (always visible below) -->
+                <div class="card" id="wifi-reg-list-card" style="display:none;">
+                    <h3>Registered Students (Wi-Fi) — <span id="wifi-reg-loaded-section"></span></h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Roll Number</th>
+                                    <th>Name</th>
+                                    <th>Wi-Fi MAC</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="wifi-registered-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Wi-Fi Attendance Tab -->
+            <section id="section-wifi-attendance" class="tab-content">
+                <h1>Wi-Fi Attendance</h1>
+
+                <!-- Step 1: Session Setup (identical structure to BLE) -->
+                <div id="wifi-att-setup" class="card">
+                    <h3>Step 1: Session Setup</h3>
+                    <div class="form-group">
+                        <label for="wifi-att-title">Lecture Title</label>
+                        <input type="text" id="wifi-att-title" placeholder="e.g. Database Systems">
+                    </div>
+                    <div class="form-group">
+                        <label for="wifi-att-date">Date</label>
+                        <input type="date" id="wifi-att-date">
+                    </div>
+                    <div class="form-group">
+                        <label for="wifi-att-section">Section</label>
+                        <select id="wifi-att-section-dropdown"></select>
+                    </div>
+                    <div class="form-group">
+                        <label for="wifi-att-duration">Session Duration (Minutes): <span id="wifi-att-duration-val" style="color: #6366f1; font-weight: 800;">5</span></label>
+                        <input type="range" id="wifi-att-duration" min="2" max="10" value="5" step="1" oninput="document.getElementById('wifi-att-duration-val').innerText = this.value" style="accent-color: #6366f1; cursor: pointer;">
+                    </div>
+                    <button id="btn-wifi-att-next" class="btn-primary">NEXT &rarr;</button>
+                </div>
+
+                <!-- Active Session (hidden until started) -->
+                <div id="wifi-att-active" style="display:none;">
+                    <div class="attendance-header-bar">
+                        <div id="wifi-session-info-display">
+                            <h3 id="wifi-active-lecture-title">Lecture Title</h3>
+                            <p id="wifi-session-stats">0 present, 0 absent</p>
+                        </div>
+                        <!-- Wi-Fi Attendance Timer -->
+                        <div class="timer-container">
+                            <span class="timer" id="wifi-attendance-timer">02:00</span>
+                        </div>
+                        <div class="header-actions">
+                            <button id="btn-wifi-att-stop" class="btn-danger">STOP WI-FI SESSION</button>
+                        </div>
+                    </div>
+
+                    <!-- Batch instruction banner -->
+                    <div class="card" style="background:rgba(59,130,246,0.08); border-left:4px solid #3b82f6; margin-bottom:2rem;">
+                        <p style="color:#1e40af; font-size:0.9rem;">
+                            <strong><i class="fas fa-users"></i> Batch Instructions:</strong>
+                            Send students in batches of 8. Ask each batch to connect to the hotspot.
+                            Attendance is marked automatically within 5 seconds of connecting.
+                            Ask them to disconnect once marked present so the next batch can join.
+                        </p>
+                    </div>
+
+                    <div class="live-attendance-grid">
+                        <div class="card attendance-split-card">
+                            <h3 class="absent-header"><i class="fas fa-user-times"></i> Absent Students</h3>
+                            <div class="table-container">
+                                <table id="wifi-table-absent">
+                                    <thead><tr><th>Roll Number</th><th>Name</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="card attendance-split-card">
+                            <h3 class="present-header"><i class="fas fa-user-check"></i> Present Students</h3>
+                            <div class="table-container">
+                                <table id="wifi-table-present">
+                                    <thead><tr><th>Roll Number</th><th>Name</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Session Complete -->
+                <div id="wifi-session-complete" style="display:none;">
+                    <div class="card session-complete-card">
+                        <i class="fas fa-check-circle"></i>
+                        <h2>Wi-Fi Session Complete</h2>
+                        <p>Attendance has been recorded successfully.</p>
+                        <div class="action-row">
+                            <button id="btn-wifi-export-yes" class="btn-success">Yes, Export & Finish</button>
+                            <button id="btn-wifi-export-no" class="btn-primary">No, Just Finish</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
         </main>
     </div>
 
