@@ -81,12 +81,11 @@ DATABASE_URL=postgresql://postgres:YOUR_PASSWORD@localhost:5432/attendance_db
 > ⚠️ Never share or push your `.env` file to GitHub.
 
 ### Step 5 — Run the Application
+1. Go to the `dist/` folder
+2. Place your `.env` file in the **same folder** as `main.exe`
+3. Double-click **`main.exe`** to launch
 
-```bash
-python main.py
-```
-
-A browser window will automatically open at `http://localhost:8000` 🎉
+A browser window will open at `http://localhost:8000` 🎉
 
 ---
 
